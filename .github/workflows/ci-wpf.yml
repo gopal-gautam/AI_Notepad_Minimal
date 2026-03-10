@@ -1,0 +1,91 @@
+name: WPF CI/CD
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: "8.0.x"
+  CONFIGURATION: Release
+
+  # Current solution
+  Solution_Name: Minimal_Notepad_AI.slnx
+
+  # Optional paths. Leave empty until you add these projects.
+  Test_Project_Path: ""
+  Wap_Project_Directory: ""
+  Wap_Project_Path: ""
+
+jobs:
+  build-test-package:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore "${{ env.Solution_Name }}"
+
+      - name: Build
+        run: dotnet build "${{ env.Solution_Name }}" --configuration "${{ env.CONFIGURATION }}" --no-restore
+
+      - name: Test (optional)
+        if: ${{ env.Test_Project_Path != '' }}
+        run: dotnet test "${{ env.Test_Project_Path }}" --configuration "${{ env.CONFIGURATION }}" --no-build --verbosity normal
+
+      - name: Setup MSBuild
+        if: ${{ env.Wap_Project_Path != '' }}
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Decode signing certificate (optional)
+        if: ${{ env.Wap_Project_Path != '' && secrets.PFX_BASE64 != '' && secrets.PFX_PASSWORD != '' }}
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("${{ github.workspace }}/signing-cert.pfx", [Convert]::FromBase64String("${{ secrets.PFX_BASE64 }}"))
+
+      - name: Build and package MSIX (unsigned)
+        if: ${{ env.Wap_Project_Path != '' && (secrets.PFX_BASE64 == '' || secrets.PFX_PASSWORD == '') }}
+        run: >
+          msbuild "${{ env.Wap_Project_Path }}"
+          /p:Configuration=${{ env.CONFIGURATION }}
+          /p:UapAppxPackageBuildMode=StoreUpload
+          /p:AppxBundle=Always
+          /p:AppxBundlePlatforms=x64
+          /p:GenerateAppxPackageOnBuild=true
+
+      - name: Build, sign and package MSIX
+        if: ${{ env.Wap_Project_Path != '' && secrets.PFX_BASE64 != '' && secrets.PFX_PASSWORD != '' }}
+        run: >
+          msbuild "${{ env.Wap_Project_Path }}"
+          /p:Configuration=${{ env.CONFIGURATION }}
+          /p:UapAppxPackageBuildMode=StoreUpload
+          /p:AppxBundle=Always
+          /p:AppxBundlePlatforms=x64
+          /p:GenerateAppxPackageOnBuild=true
+          /p:PackageCertificateKeyFile="${{ github.workspace }}/signing-cert.pfx"
+          /p:PackageCertificatePassword="${{ secrets.PFX_PASSWORD }}"
+
+      - name: Upload package artifacts (optional)
+        if: ${{ env.Wap_Project_Directory != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: msix-package
+          path: ${{ env.Wap_Project_Directory }}/AppPackages/**
+          if-no-files-found: warn
+
+      - name: Cleanup signing certificate
+        if: ${{ always() && env.Wap_Project_Path != '' }}
+        shell: pwsh
+        run: |
+          if (Test-Path "${{ github.workspace }}/signing-cert.pfx") {
+            Remove-Item "${{ github.workspace }}/signing-cert.pfx" -Force
+          }
