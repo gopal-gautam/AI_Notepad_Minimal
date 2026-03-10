@@ -22,6 +22,9 @@ env:
 jobs:
   build-test-package:
     runs-on: windows-latest
+    env:
+      PFX_BASE64: ${{ secrets.PFX_BASE64 }}
+      PFX_PASSWORD: ${{ secrets.PFX_PASSWORD }}
 
     steps:
       - name: Checkout
@@ -47,13 +50,13 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Decode signing certificate (optional)
-        if: ${{ env.Wap_Project_Path != '' && secrets.PFX_BASE64 != '' && secrets.PFX_PASSWORD != '' }}
+        if: ${{ env.Wap_Project_Path != '' && env.PFX_BASE64 != '' && env.PFX_PASSWORD != '' }}
         shell: pwsh
         run: |
-          [IO.File]::WriteAllBytes("${{ github.workspace }}/signing-cert.pfx", [Convert]::FromBase64String("${{ secrets.PFX_BASE64 }}"))
+          [IO.File]::WriteAllBytes("${{ github.workspace }}/signing-cert.pfx", [Convert]::FromBase64String("${{ env.PFX_BASE64 }}"))
 
       - name: Build and package MSIX (unsigned)
-        if: ${{ env.Wap_Project_Path != '' && (secrets.PFX_BASE64 == '' || secrets.PFX_PASSWORD == '') }}
+        if: ${{ env.Wap_Project_Path != '' && (env.PFX_BASE64 == '' || env.PFX_PASSWORD == '') }}
         run: >
           msbuild "${{ env.Wap_Project_Path }}"
           /p:Configuration=${{ env.CONFIGURATION }}
@@ -63,7 +66,7 @@ jobs:
           /p:GenerateAppxPackageOnBuild=true
 
       - name: Build, sign and package MSIX
-        if: ${{ env.Wap_Project_Path != '' && secrets.PFX_BASE64 != '' && secrets.PFX_PASSWORD != '' }}
+        if: ${{ env.Wap_Project_Path != '' && env.PFX_BASE64 != '' && env.PFX_PASSWORD != '' }}
         run: >
           msbuild "${{ env.Wap_Project_Path }}"
           /p:Configuration=${{ env.CONFIGURATION }}
@@ -72,7 +75,7 @@ jobs:
           /p:AppxBundlePlatforms=x64
           /p:GenerateAppxPackageOnBuild=true
           /p:PackageCertificateKeyFile="${{ github.workspace }}/signing-cert.pfx"
-          /p:PackageCertificatePassword="${{ secrets.PFX_PASSWORD }}"
+          /p:PackageCertificatePassword="${{ env.PFX_PASSWORD }}"
 
       - name: Upload package artifacts (optional)
         if: ${{ env.Wap_Project_Directory != '' }}
